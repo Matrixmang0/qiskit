@@ -14,7 +14,7 @@
 
 
 """
-Tests for singleton gate behavior
+Tests for singleton gate and instruction behavior
 """
 
 import copy
@@ -36,6 +36,7 @@ from qiskit.circuit.library import (
     XGate,
     C4XGate,
 )
+from qiskit.circuit import Measure, Reset
 from qiskit.circuit import Clbit, QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.circuit.singleton import SingletonGate, SingletonInstruction
 from qiskit.converters import dag_to_circuit, circuit_to_dag
@@ -324,21 +325,6 @@ class TestSingletonGate(QiskitTestCase):
         self.assertTrue(gate.mutable)
         self.assertEqual(gate.x, 1)
         self.assertIsNot(MyAbstractGate(1), MyAbstractGate(1))
-
-    def test_inherit_singleton(self):
-        class Measure(SingletonInstruction):
-            def __init__(self):
-                super().__init__("measure", 1, 1, [])
-
-        class ESPMeasure(Measure):
-            pass
-
-        base = Measure()
-        esp = ESPMeasure()
-        self.assertIs(esp, ESPMeasure())
-        self.assertIsNot(esp, base)
-        self.assertIs(base.base_class, Measure)
-        self.assertIs(esp.base_class, ESPMeasure)
 
     def test_singleton_with_default(self):
         # Explicitly setting the label to its default.
@@ -760,3 +746,631 @@ class TestSingletonControlledGate(QiskitTestCase):
         self.assertIs(C4XGate(), C4XGate(ctrl_state=15))
         self.assertIs(C4XGate(), C4XGate(ctrl_state="1111"))
         self.assertIsNot(C4XGate(), C4XGate(ctrl_state=0))
+
+
+class TestSingletonInstruction(QiskitTestCase):
+    """Qiskit SingletonInstruction tests."""
+
+    def test_default_singleton(self):
+        measure = Measure()
+        new_measure = Measure()
+        self.assertIs(measure, new_measure)
+
+        reset = Reset()
+        new_reset = Reset()
+        self.assertIs(reset, new_reset)
+
+    def test_base_class(self):
+        measure = Measure()
+        self.assertIsInstance(measure, Measure)
+        self.assertIs(measure.base_class, Measure)
+
+        reset = Reset()
+        self.assertIsInstance(reset, Reset)
+        self.assertIs(reset.base_class, Reset)
+
+    def test_label_not_singleton(self):
+        measure = Measure()
+        label_measure = Measure(label="special")
+        self.assertIsNot(measure, label_measure)
+
+        reset = Reset()
+        label_reset = Reset(label="special")
+        self.assertIsNot(reset, label_reset)
+
+    def test_condition_not_singleton(self):
+        measure = Measure()
+        condition_measure = Measure().c_if(Clbit(), 0)
+        self.assertIsNot(measure, condition_measure)
+
+        reset = Reset()
+        condition_reset = Reset().c_if(Clbit(), 0)
+        self.assertIsNot(reset, condition_reset)
+
+    def test_raise_on_state_mutation(self):
+        measure = Measure()
+        with self.assertRaises(TypeError):
+            measure.label = "foo"
+        with self.assertRaises(TypeError):
+            measure.condition = (Clbit(), 0)
+
+        reset = Reset()
+        with self.assertRaises(TypeError):
+            reset.label = "foo"
+        with self.assertRaises(TypeError):
+            reset.condition = (Clbit(), 0)
+
+    def test_labeled_condition(self):
+        singleton_measure = Measure()
+        clbit = Clbit()
+        measure = Measure(label="conditionally special").c_if(clbit, 0)
+        self.assertIsNot(singleton_measure, measure)
+        self.assertEqual(measure.label, "conditionally special")
+        self.assertEqual(measure.condition, (clbit, 0))
+
+        singleton_reset = Reset()
+        clbit = Clbit()
+        reset = Reset(label="conditionally special").c_if(clbit, 0)
+        self.assertIsNot(singleton_reset, reset)
+        self.assertEqual(reset.label, "conditionally special")
+        self.assertEqual(reset.condition, (clbit, 0))
+
+    def test_default_singleton_copy(self):
+        measure = Measure()
+        copied = measure.copy()
+        self.assertIs(measure, copied)
+
+        reset = Reset()
+        copied = reset.copy()
+        self.assertIs(reset, copied)
+
+    def test_label_copy(self):
+        measure = Measure(label="special")
+        copied = measure.copy()
+        self.assertIsNot(measure, copied)
+        self.assertEqual(measure, copied)
+
+        reset = Reset(label="special")
+        copied = reset.copy()
+        self.assertIsNot(reset, copied)
+        self.assertEqual(reset, copied)
+
+    def test_label_copy_new(self):
+        measure = Measure()
+        label_measure = Measure(label="special")
+        self.assertIsNot(measure, label_measure)
+        self.assertNotEqual(measure.label, label_measure.label)
+        copied = measure.copy()
+        copied_label = label_measure.copy()
+        self.assertIs(measure, copied)
+        self.assertIsNot(copied, label_measure)
+        self.assertIsNot(copied_label, measure)
+        self.assertIsNot(copied_label, label_measure)
+        self.assertNotEqual(copied.label, label_measure.label)
+        self.assertEqual(copied_label, label_measure)
+        self.assertNotEqual(copied.label, "special")
+        self.assertEqual(copied_label.label, "special")
+
+        reset = Reset()
+        label_reset = Reset(label="special")
+        self.assertIsNot(reset, label_reset)
+        self.assertNotEqual(reset.label, label_reset.label)
+        copied = reset.copy()
+        copied_label = label_reset.copy()
+        self.assertIs(reset, copied)
+        self.assertIsNot(copied, label_reset)
+        self.assertIsNot(copied_label, reset)
+        self.assertIsNot(copied_label, label_reset)
+        self.assertNotEqual(copied.label, label_reset.label)
+        self.assertEqual(copied_label, label_reset)
+        self.assertNotEqual(copied.label, "special")
+        self.assertEqual(copied_label.label, "special")
+
+    def test_condition_copy(self):
+        measure = Measure().c_if(Clbit(), 0)
+        copied = measure.copy()
+        self.assertIsNot(measure, copied)
+        self.assertEqual(measure, copied)
+
+        reset = Reset().c_if(Clbit(), 0)
+        copied = reset.copy()
+        self.assertIsNot(reset, copied)
+        self.assertEqual(reset, copied)
+
+    def test_condition_label_copy(self):
+        clbit = Clbit()
+        measure = Measure(label="conditionally special").c_if(clbit, 0)
+        copied_measure = measure.copy()
+        self.assertIsNot(measure, copied_measure)
+        self.assertEqual(measure, copied_measure)
+        self.assertEqual(copied_measure.label, "conditionally special")
+        self.assertEqual(copied_measure.condition, (clbit, 0))
+
+        clbit = Clbit()
+        reset = Reset(label="conditionally special").c_if(clbit, 0)
+        copied_reset = reset.copy()
+        self.assertIsNot(reset, copied_reset)
+        self.assertEqual(reset, copied_reset)
+        self.assertEqual(copied_reset.label, "conditionally special")
+        self.assertEqual(copied_reset.condition, (clbit, 0))
+
+    def test_deepcopy(self):
+        measure = Measure()
+        copied = copy.deepcopy(measure)
+        self.assertIs(measure, copied)
+
+        reset = Reset()
+        copied = copy.deepcopy(reset)
+        self.assertIs(reset, copied)
+
+    def test_deepcopy_with_label(self):
+        measure = Measure(label="special")
+        copied = copy.deepcopy(measure)
+        self.assertIsNot(measure, copied)
+        self.assertEqual(measure, copied)
+        self.assertEqual(copied.label, "special")
+
+        reset = Reset(label="special")
+        copied = copy.deepcopy(reset)
+        self.assertIsNot(reset, copied)
+        self.assertEqual(reset, copied)
+        self.assertEqual(copied.label, "special")
+
+    def test_deepcopy_with_condition(self):
+        measure = Measure().c_if(Clbit(), 0)
+        copied = copy.deepcopy(measure)
+        self.assertIsNot(measure, copied)
+        self.assertEqual(measure, copied)
+
+        reset = Reset().c_if(Clbit(), 0)
+        copied = copy.deepcopy(reset)
+        self.assertIsNot(reset, copied)
+        self.assertEqual(reset, copied)
+
+    def test_condition_label_deepcopy(self):
+        clbit = Clbit()
+        measure = Measure(label="conditionally special").c_if(clbit, 0)
+        copied = copy.deepcopy(measure)
+        self.assertIsNot(measure, copied)
+        self.assertEqual(measure, copied)
+        self.assertEqual(copied.label, "conditionally special")
+        self.assertEqual(copied.condition, (clbit, 0))
+
+        clbit = Clbit()
+        reset = Reset(label="conditionally special").c_if(clbit, 0)
+        copied = copy.deepcopy(reset)
+        self.assertIsNot(reset, copied)
+        self.assertEqual(reset, copied)
+        self.assertEqual(copied.label, "conditionally special")
+        self.assertEqual(copied.condition, (clbit, 0))
+
+    def test_label_deepcopy_new(self):
+        measure = Measure()
+        label_measure = Measure(label="special")
+        self.assertIsNot(measure, label_measure)
+        self.assertNotEqual(measure.label, label_measure.label)
+        copied = copy.deepcopy(measure)
+        copied_label = copy.deepcopy(label_measure)
+        self.assertIs(measure, copied)
+        self.assertIsNot(copied, label_measure)
+        self.assertIsNot(copied_label, measure)
+        self.assertIsNot(copied_label, label_measure)
+        self.assertNotEqual(copied.label, label_measure.label)
+        self.assertEqual(copied_label, label_measure)
+        self.assertNotEqual(copied.label, "special")
+        self.assertEqual(copied_label.label, "special")
+
+        reset = Reset()
+        label_reset = Reset(label="special")
+        self.assertIsNot(reset, label_reset)
+        self.assertNotEqual(reset.label, label_reset.label)
+        copied = copy.deepcopy(reset)
+        copied_label = copy.deepcopy(label_reset)
+        self.assertIs(reset, copied)
+        self.assertIsNot(copied, label_reset)
+        self.assertIsNot(copied_label, reset)
+        self.assertIsNot(copied_label, label_reset)
+        self.assertNotEqual(copied.label, label_reset.label)
+        self.assertEqual(copied_label, label_reset)
+        self.assertNotEqual(copied.label, "special")
+        self.assertEqual(copied_label.label, "special")
+
+    def test_round_trip_dag_conversion(self):
+        qc = QuantumCircuit(1, 1)
+        measure = Measure()
+        reset = Reset()
+        qc.append(measure, [0], [0])
+        qc.append(reset, [0])
+        dag = circuit_to_dag(qc)
+        out = dag_to_circuit(dag)
+        self.assertIs(qc.data[0].operation, out.data[0].operation)
+        self.assertIs(qc.data[1].operation, out.data[1].operation)
+
+    def test_round_trip_dag_conversion_with_label(self):
+        measure = Measure(label="special_measurement")
+        reset = Reset(label="special_reset")
+        qc = QuantumCircuit(1, 1)
+        qc.append(measure, [0], [0])
+        qc.append(reset, [0])
+        dag = circuit_to_dag(qc)
+        out = dag_to_circuit(dag)
+        self.assertIsNot(qc.data[0].operation, out.data[0].operation)
+        self.assertIsNot(qc.data[1].operation, out.data[1].operation)
+        self.assertEqual(qc.data[0].operation, out.data[0].operation)
+        self.assertEqual(qc.data[1].operation, out.data[1].operation)
+        self.assertEqual(out.data[0].operation.label, "special_measurement")
+        self.assertEqual(out.data[1].operation.label, "special_reset")
+
+    def test_round_trip_dag_conversion_with_condition(self):
+        qc = QuantumCircuit(1, 1)
+        measure = Measure().c_if(qc.cregs[0], 0)
+        reset = Reset().c_if(qc.cregs[0], 0)
+        qc.append(measure, [0], [0])
+        qc.append(reset, [0])
+        dag = circuit_to_dag(qc)
+        out = dag_to_circuit(dag)
+        self.assertIsNot(qc.data[0].operation, out.data[0].operation)
+        self.assertIsNot(qc.data[1].operation, out.data[1].operation)
+        self.assertEqual(qc.data[0].operation, out.data[0].operation)
+        self.assertEqual(qc.data[1].operation, out.data[1].operation)
+        self.assertEqual(out.data[0].operation.condition, (qc.cregs[0], 0))
+        self.assertEqual(out.data[1].operation.condition, (qc.cregs[0], 0))
+
+    def test_round_trip_dag_conversion_condition_label(self):
+        qc = QuantumCircuit(1, 1)
+        measure = Measure(label="conditionally special measurement").c_if(qc.cregs[0], 0)
+        reset = Reset(label="conditionally special reset").c_if(qc.cregs[0], 0)
+        qc.append(measure, [0], [0])
+        qc.append(reset, [0])
+        dag = circuit_to_dag(qc)
+        out = dag_to_circuit(dag)
+        self.assertIsNot(qc.data[0].operation, out.data[0].operation)
+        self.assertIsNot(qc.data[1].operation, out.data[1].operation)
+        self.assertEqual(qc.data[0].operation, out.data[0].operation)
+        self.assertEqual(qc.data[1].operation, out.data[1].operation)
+        self.assertEqual(out.data[0].operation.condition, (qc.cregs[0], 0))
+        self.assertEqual(out.data[1].operation.condition, (qc.cregs[0], 0))
+        self.assertEqual(out.data[0].operation.label, "conditionally special measurement")
+        self.assertEqual(out.data[1].operation.label, "conditionally special reset")
+
+    def test_condition_via_instructionset(self):
+        measure = Measure()
+        reset = Reset()
+        qr = QuantumRegister(2, "qr")
+        cr = ClassicalRegister(1, "cr")
+        circuit = QuantumCircuit(qr, cr)
+        circuit.measure(qr[0], cr[0]).c_if(cr, 1)
+        circuit.reset(qr[0]).c_if(cr, 1)
+        self.assertIsNot(measure, circuit.data[0].operation)
+        self.assertIsNot(reset, circuit.data[1].operation)
+        self.assertEqual(circuit.data[0].operation.condition, (cr, 1))
+        self.assertEqual(circuit.data[1].operation.condition, (cr, 1))
+
+    def test_is_mutable(self):
+        measure = Measure()
+        self.assertFalse(measure.mutable)
+        label_measure = Measure(label="foo")
+        self.assertTrue(label_measure.mutable)
+        self.assertIsNot(measure, label_measure)
+
+        reset = Reset()
+        self.assertFalse(reset.mutable)
+        label_reset = Reset(label="foo")
+        self.assertTrue(label_reset.mutable)
+        self.assertIsNot(reset, label_reset)
+
+    def test_to_mutable(self):
+        measure = Measure()
+        self.assertFalse(measure.mutable)
+        new_measure = measure.to_mutable()
+        self.assertTrue(new_measure.mutable)
+        self.assertIsNot(measure, new_measure)
+
+        reset = Reset()
+        self.assertFalse(reset.mutable)
+        new_reset = reset.to_mutable()
+        self.assertTrue(new_reset.mutable)
+        self.assertIsNot(reset, new_reset)
+
+    def test_to_mutable_setter(self):
+        measure = Measure()
+        self.assertFalse(measure.mutable)
+        mutable_measure = measure.to_mutable()
+        mutable_measure.label = "foo"
+        mutable_measure.duration = 3
+        mutable_measure.unit = "s"
+        clbit = Clbit()
+        mutable_measure.condition = (clbit, 0)
+        self.assertTrue(mutable_measure.mutable)
+        self.assertIsNot(measure, mutable_measure)
+        self.assertEqual(mutable_measure.label, "foo")
+        self.assertEqual(mutable_measure.duration, 3)
+        self.assertEqual(mutable_measure.unit, "s")
+        self.assertEqual(mutable_measure.condition, (clbit, 0))
+
+        reset = Reset()
+        self.assertFalse(reset.mutable)
+        mutable_reset = reset.to_mutable()
+        mutable_reset.label = "foo"
+        mutable_reset.duration = 3
+        mutable_reset.unit = "s"
+        clbit = Clbit()
+        mutable_reset.condition = (clbit, 0)
+        self.assertTrue(mutable_reset.mutable)
+        self.assertIsNot(reset, mutable_measure)
+        self.assertEqual(mutable_reset.label, "foo")
+        self.assertEqual(mutable_reset.duration, 3)
+        self.assertEqual(mutable_reset.unit, "s")
+        self.assertEqual(mutable_reset.condition, (clbit, 0))
+
+    def test_to_mutable_of_mutable_instance(self):
+        measure = Measure(label="foo")
+        mutable_measure_copy = measure.to_mutable()
+        self.assertIsNot(measure, mutable_measure_copy)
+        self.assertEqual(mutable_measure_copy.label, measure.label)
+        mutable_measure_copy.label = "not foo"
+        self.assertNotEqual(mutable_measure_copy.label, measure.label)
+
+        reset = Reset(label="foo")
+        mutable_reset_copy = reset.to_mutable()
+        self.assertIsNot(reset, mutable_reset_copy)
+        self.assertEqual(mutable_reset_copy.label, reset.label)
+        mutable_reset_copy.label = "not foo"
+        self.assertNotEqual(mutable_reset_copy.label, reset.label)
+
+    def test_set_custom_attr(self):
+        measure = Measure()
+        with self.assertRaises(TypeError):
+            measure.custom_foo = 12345
+        mutable_measure = measure.to_mutable()
+        self.assertTrue(mutable_measure.mutable)
+        mutable_measure.custom_foo = 12345
+        self.assertEqual(12345, mutable_measure.custom_foo)
+
+        reset = Reset()
+        with self.assertRaises(TypeError):
+            reset.custom_foo = 12345
+        mutable_reset = reset.to_mutable()
+        self.assertTrue(mutable_reset.mutable)
+        mutable_reset.custom_foo = 12345
+        self.assertEqual(12345, mutable_reset.custom_foo)
+
+    def test_positional_label(self):
+        measure = Measure()
+        label_measure = Measure("I am a little label")
+        self.assertIsNot(measure, label_measure)
+        self.assertEqual(label_measure.label, "I am a little label")
+
+        reset = Reset()
+        label_reset = Reset("I am a big label")
+        self.assertIsNot(reset, label_reset)
+        self.assertEqual(label_reset.label, "I am a big label")
+
+    def test_immutable_pickle(self):
+        measure = Measure()
+        self.assertFalse(measure.mutable)
+        with io.BytesIO() as fd:
+            pickle.dump(measure, fd)
+            fd.seek(0)
+            copied_measure = pickle.load(fd)
+        self.assertFalse(copied_measure.mutable)
+        self.assertIs(copied_measure, measure)
+
+        reset = Reset()
+        self.assertFalse(reset.mutable)
+        with io.BytesIO() as fd:
+            pickle.dump(reset, fd)
+            fd.seek(0)
+            copied_reset = pickle.load(fd)
+        self.assertFalse(copied_reset.mutable)
+        self.assertIs(copied_reset, reset)
+
+    def test_mutable_pickle(self):
+        measure = Measure()
+        clbit = Clbit()
+        condition_measure = measure.c_if(clbit, 0)
+        self.assertIsNot(measure, condition_measure)
+        self.assertEqual(condition_measure.condition, (clbit, 0))
+        self.assertTrue(condition_measure.mutable)
+        with io.BytesIO() as fd:
+            pickle.dump(condition_measure, fd)
+            fd.seek(0)
+            copied_measure = pickle.load(fd)
+        self.assertEqual(copied_measure, condition_measure)
+        self.assertTrue(copied_measure.mutable)
+
+        reset = Reset()
+        clbit = Clbit()
+        condition_reset = reset.c_if(clbit, 0)
+        self.assertIsNot(reset, condition_reset)
+        self.assertEqual(condition_reset.condition, (clbit, 0))
+        self.assertTrue(condition_reset.mutable)
+        with io.BytesIO() as fd:
+            pickle.dump(condition_reset, fd)
+            fd.seek(0)
+            copied_reset = pickle.load(fd)
+        self.assertEqual(copied_reset, condition_reset)
+        self.assertTrue(copied_reset.mutable)
+
+    def test_uses_default_arguments(self):
+        class MyInstruction(SingletonInstruction):
+            def __init__(self, label="my label"):
+                super().__init__("my_instruction", 1, 0, [], label=label)
+
+        instruction = MyInstruction()
+        self.assertIs(instruction, MyInstruction())
+        self.assertFalse(instruction.mutable)
+        self.assertIs(instruction.base_class, MyInstruction)
+        self.assertEqual(instruction.label, "my label")
+
+        with self.assertRaisesRegex(TypeError, "immutable"):
+            instruction.label = None
+
+    def test_suppress_singleton(self):
+        # Mostly the test here is that the `class` statement passes; it would raise if it attempted
+        # to create a singleton instance since there's no defaults.
+        class MyAbstractInstruction(SingletonInstruction, create_default_singleton=False):
+            def __init__(self, x):
+                super().__init__("my_abstract", 1, 0, [])
+                self.x = x
+
+        instruction = MyAbstractInstruction(1)
+        self.assertTrue(instruction.mutable)
+        self.assertEqual(instruction.x, 1)
+        self.assertIsNot(MyAbstractInstruction(1), MyAbstractInstruction(1))
+
+    def test_inherit_singleton(self):
+        class ESPMeasure(Measure):
+            pass
+
+        measure_base = Measure()
+        esp_measure = ESPMeasure()
+        self.assertIs(esp_measure, ESPMeasure())
+        self.assertIsNot(esp_measure, measure_base)
+        self.assertIs(measure_base.base_class, Measure)
+        self.assertIs(esp_measure.base_class, ESPMeasure)
+
+        class ESPReset(Reset):
+            pass
+
+        reset_base = Reset()
+        esp_reset = ESPReset()
+        self.assertIs(esp_reset, ESPReset())
+        self.assertIsNot(esp_reset, reset_base)
+        self.assertIs(reset_base.base_class, Reset)
+        self.assertIs(esp_reset.base_class, ESPReset)
+
+    def test_singleton_with_default(self):
+        # Explicitly setting the label to its default.
+        measure = Measure(label=None)
+        self.assertIs(measure, Measure())
+        self.assertIsNot(measure, Measure(label="label"))
+
+        reset = Reset(label=None)
+        self.assertIs(reset, Reset())
+        self.assertIsNot(reset, Reset(label="label"))
+
+    def test_additional_singletons(self):
+        additional_inputs = [
+            ((1,), {}),
+            ((2,), {"label": "x"}),
+        ]
+
+        class Discrete(SingletonInstruction, additional_singletons=additional_inputs):
+            def __init__(self, n=0, label=None):
+                super().__init__("discrete", 1, 0, [], label=label)
+                self.n = n
+
+            @staticmethod
+            def _singleton_lookup_key(n=0, label=None):  # pylint: disable=arguments-differ
+                # This is an atypical usage - in Qiskit standard instruction, the `label` being set
+                # not-None should not generate a singleton, so should return a mutable instance.
+                return (n, label)
+
+        default = Discrete()
+        self.assertIs(default, Discrete())
+        self.assertIs(default, Discrete(0, label=None))
+        self.assertEqual(default.n, 0)
+        self.assertIsNot(default, Discrete(1))
+
+        one = Discrete(1)
+        self.assertIs(one, Discrete(1))
+        self.assertIs(one, Discrete(1, label=None))
+        self.assertEqual(one.n, 1)
+        self.assertIs(one.label, None)
+
+        two = Discrete(2, label="x")
+        self.assertIs(two, Discrete(2, label="x"))
+        self.assertIsNot(two, Discrete(2))
+        self.assertEqual(two.n, 2)
+        self.assertEqual(two.label, "x")
+
+        # This doesn't match any of the defined singletons, and we're checking that it's not
+        # spuriously cached without us asking for it.
+        self.assertIsNot(Discrete(2), Discrete(2))
+
+    def test_additional_singletons_copy(self):
+        additional_inputs = [
+            ((1,), {}),
+            ((2,), {"label": "x"}),
+        ]
+
+        class Discrete(SingletonInstruction, additional_singletons=additional_inputs):
+            def __init__(self, n=0, label=None):
+                super().__init__("discrete", 1, 0, [], label=label)
+                self.n = n
+
+            @staticmethod
+            def _singleton_lookup_key(n=0, label=None):  # pylint: disable=arguments-differ
+                return (n, label)
+
+        default = Discrete()
+        one = Discrete(1)
+        two = Discrete(2, "x")
+        mutable = Discrete(3)
+
+        self.assertIsNot(default, default.to_mutable())
+        self.assertEqual(default.n, default.to_mutable().n)
+        self.assertIsNot(one, one.to_mutable())
+        self.assertEqual(one.n, one.to_mutable().n)
+        self.assertIsNot(two, two.to_mutable())
+        self.assertEqual(two.n, two.to_mutable().n)
+        self.assertIsNot(mutable, mutable.to_mutable())
+        self.assertEqual(mutable.n, mutable.to_mutable().n)
+
+        # The equality assertions in the middle are sanity checks that nothing got overwritten.
+
+        self.assertIs(default, copy.copy(default))
+        self.assertEqual(default.n, 0)
+        self.assertIs(one, copy.copy(one))
+        self.assertEqual(one.n, 1)
+        self.assertIs(two, copy.copy(two))
+        self.assertEqual(two.n, 2)
+        self.assertIsNot(mutable, copy.copy(mutable))
+
+        self.assertIs(default, copy.deepcopy(default))
+        self.assertEqual(default.n, 0)
+        self.assertIs(one, copy.deepcopy(one))
+        self.assertEqual(one.n, 1)
+        self.assertIs(two, copy.deepcopy(two))
+        self.assertEqual(two.n, 2)
+        self.assertIsNot(mutable, copy.deepcopy(mutable))
+
+    def test_additional_singletons_pickle(self):
+        additional_inputs = [
+            ((1,), {}),
+            ((2,), {"label": "x"}),
+        ]
+
+        class Discrete(SingletonInstruction, additional_singletons=additional_inputs):
+            def __init__(self, n=0, label=None):
+                super().__init__("discrete", 1, 0, [], label=label)
+                self.n = n
+
+            @staticmethod
+            def _singleton_lookup_key(n=0, label=None):  # pylint: disable=arguments-differ
+                return (n, label)
+
+        # Pickle needs the class to be importable.  We want the class to only be instantiated inside
+        # the test, which means we need a little magic to make it pretend-importable.
+        dummy_module = types.ModuleType("_QISKIT_DUMMY_" + str(uuid.uuid4()).replace("-", "_"))
+        dummy_module.Discrete = Discrete
+        Discrete.__module__ = dummy_module.__name__
+        Discrete.__qualname__ = Discrete.__name__
+
+        default = Discrete()
+        one = Discrete(1)
+        two = Discrete(2, "x")
+        mutable = Discrete(3)
+
+        with unittest.mock.patch.dict(sys.modules, {dummy_module.__name__: dummy_module}):
+            # The singletons in `additional_singletons` are statics; their lifetimes should be tied
+            # to the type object itself, so if we don't delete it, it should be eligible to be
+            # reloaded from and produce the exact instances.
+            self.assertIs(default, pickle.loads(pickle.dumps(default)))
+            self.assertEqual(default.n, 0)
+            self.assertIs(one, pickle.loads(pickle.dumps(one)))
+            self.assertEqual(one.n, 1)
+            self.assertIs(two, pickle.loads(pickle.dumps(two)))
+            self.assertEqual(two.n, 2)
+            self.assertIsNot(mutable, pickle.loads(pickle.dumps(mutable)))
